@@ -225,10 +225,18 @@
     font-size:15px;
     white-space:nowrap;
   }
+  .ticket-actions{
+    display:flex; align-items:center; gap:2px;
+  }
   .ticket .del{
     background:none; border:none; color: var(--rust);
     cursor:pointer; font-size: 18px; line-height:1;
-    margin-left: 8px; padding: 2px 4px;
+    padding: 2px 6px;
+  }
+  .ticket .edit{
+    background:none; border:none; color: var(--ink-soft);
+    cursor:pointer; font-size: 14px; line-height:1;
+    padding: 2px 6px;
   }
   .ticket .col{ display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
 
@@ -400,8 +408,8 @@
     </div>
   </section>
 
-  <section>
-    <h2>Registrar gasto</h2>
+  <section id="expenseFormSection">
+    <h2 id="expenseFormHeading">Registrar gasto</h2>
     <div class="card">
       <label for="descInput">Descrição</label>
       <input type="text" id="descInput" placeholder="Ex: Uber do aeroporto">
@@ -418,7 +426,8 @@
       </div>
       <div class="participants" id="participantsBox"></div>
 
-      <button class="btn gold" onclick="addExpense()">Adicionar gasto</button>
+      <button class="btn gold" id="expenseSubmitBtn" onclick="addExpense()">Adicionar gasto</button>
+      <button class="btn ghost" id="cancelEditBtn" style="display:none; margin-top:8px;" onclick="cancelEditExpense()">Cancelar edição</button>
     </div>
   </section>
 
@@ -610,6 +619,8 @@ function toggleParticipant(name){
   renderParticipants();
 }
 
+let editingExpenseId = null;
+
 function addExpense(){
   const desc = document.getElementById('descInput').value.trim();
   const amount = parseCurrencyInput(document.getElementById('amountInput').value);
@@ -621,20 +632,77 @@ function addExpense(){
   if(!payer){ alert('Adicione pessoas primeiro.'); return; }
   if(participants.length === 0){ alert('Escolha quem participa desse gasto.'); return; }
 
-  state.expenses.push({
-    id: Date.now(),
-    desc, amount, payer, participants
-  });
+  if(editingExpenseId){
+    const exp = state.expenses.find(e => e.id === editingExpenseId);
+    if(exp){
+      exp.desc = desc;
+      exp.amount = amount;
+      exp.payer = payer;
+      exp.participants = participants;
+    }
+    editingExpenseId = null;
+  } else {
+    state.expenses.push({
+      id: Date.now(),
+      desc, amount, payer, participants
+    });
+  }
 
   document.getElementById('descInput').value = '';
   document.getElementById('amountInput').value = '';
   state.activeParticipants = [];
 
+  updateFormModeUI();
   saveState();
   renderAll();
 }
 
+function editExpense(id){
+  const exp = state.expenses.find(e => e.id === id);
+  if(!exp) return;
+
+  editingExpenseId = id;
+  document.getElementById('descInput').value = exp.desc;
+  document.getElementById('amountInput').value = exp.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  state.activeParticipants = [...exp.participants];
+
+  renderPayerSelect();
+  document.getElementById('payerSelect').value = exp.payer;
+  renderParticipants();
+  updateFormModeUI();
+
+  document.getElementById('expenseFormSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelEditExpense(){
+  editingExpenseId = null;
+  document.getElementById('descInput').value = '';
+  document.getElementById('amountInput').value = '';
+  state.activeParticipants = [];
+  renderParticipants();
+  updateFormModeUI();
+}
+
+function updateFormModeUI(){
+  const btn = document.getElementById('expenseSubmitBtn');
+  const cancelBtn = document.getElementById('cancelEditBtn');
+  const heading = document.getElementById('expenseFormHeading');
+  if(editingExpenseId){
+    btn.textContent = 'Salvar alterações';
+    cancelBtn.style.display = 'block';
+    heading.textContent = 'Editando gasto';
+  } else {
+    btn.textContent = 'Adicionar gasto';
+    cancelBtn.style.display = 'none';
+    heading.textContent = 'Registrar gasto';
+  }
+}
+
 function removeExpense(id){
+  if(editingExpenseId === id){
+    editingExpenseId = null;
+    updateFormModeUI();
+  }
   state.expenses = state.expenses.filter(e => e.id !== id);
   saveState();
   renderAll();
@@ -785,9 +853,13 @@ function renderExpenses(){
       </div>
       <div class="col">
         <div class="amt">${fmt(e.amount)}</div>
-        <button class="del" title="Remover">×</button>
+        <div class="ticket-actions">
+          <button class="edit" title="Editar">✎</button>
+          <button class="del" title="Remover">×</button>
+        </div>
       </div>
     `;
+    row.querySelector('.edit').onclick = () => editExpense(e.id);
     row.querySelector('.del').onclick = () => removeExpense(e.id);
     list.appendChild(row);
   });
