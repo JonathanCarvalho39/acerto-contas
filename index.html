@@ -250,7 +250,7 @@
   .val.neg{ color: #F0A98B; }
 
   .settle-row{
-    display:flex; align-items:center; gap:10px;
+    display:flex; align-items:center; gap:10px; flex-wrap: wrap;
     background: var(--paper);
     color: var(--ink);
     border-radius: var(--radius);
@@ -259,13 +259,29 @@
     font-size: 14px;
   }
   .settle-row .arrow{ color: var(--gold-deep); font-size:16px; }
-  .settle-row .who{ flex:1; }
+  .settle-row .who{ flex:1; min-width: 140px; }
   .settle-row .who b{ font-weight:600; }
   .settle-row .amt{
     font-family:'IBM Plex Mono', monospace;
     font-weight:700;
     color: var(--green);
     font-size: 14.5px;
+  }
+  .pay-btn{
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+  }
+  .pay-btn.undo{
+    background: none;
+    color: var(--ink-soft);
+    border: 1px solid rgba(27,53,71,0.25);
   }
 
   .all-settled{
@@ -391,7 +407,7 @@
       <input type="text" id="descInput" placeholder="Ex: Uber do aeroporto">
 
       <label for="amountInput">Valor total (R$)</label>
-      <input type="number" id="amountInput" placeholder="0,00" step="0.01" min="0">
+      <input type="text" inputmode="numeric" id="amountInput" placeholder="0,00" oninput="maskCurrency(this)">
 
       <label for="payerSelect">Quem pagou</label>
       <select id="payerSelect"></select>
@@ -439,7 +455,28 @@
 
 <script>
 const STORAGE_KEY = 'acerto-contas:trip-data';
-let state = { people: [], expenses: [], activeParticipants: [] };
+let state = { people: [], expenses: [], activeParticipants: [], payments: [] };
+
+function maskCurrency(el){
+  let digits = el.value.replace(/\D/g, '');
+  digits = digits.replace(/^0+(?=\d)/, '');
+  digits = digits.slice(0, 12);
+  if(digits === '') digits = '0';
+  const cents = digits.padStart(3, '0');
+  let intPart = cents.slice(0, -2);
+  const centPart = cents.slice(-2);
+  intPart = intPart.replace(/^0+(?=\d)/, '');
+  if(intPart === '') intPart = '0';
+  intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  el.value = intPart + ',' + centPart;
+}
+
+function parseCurrencyInput(str){
+  if(!str) return 0;
+  const normalized = str.replace(/\./g, '').replace(',', '.');
+  const val = parseFloat(normalized);
+  return isNaN(val) ? 0 : val;
+}
 
 const hasClaudeStorage = (typeof window.storage !== 'undefined'
   && typeof window.storage.get === 'function'
@@ -464,6 +501,7 @@ async function loadState(){
         const parsed = JSON.parse(res.value);
         state.people = parsed.people || [];
         state.expenses = parsed.expenses || [];
+        state.payments = parsed.payments || [];
       }
     } else if(hasLocalStorage()){
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -471,6 +509,7 @@ async function loadState(){
         const parsed = JSON.parse(raw);
         state.people = parsed.people || [];
         state.expenses = parsed.expenses || [];
+        state.payments = parsed.payments || [];
       }
     }
   }catch(e){
@@ -491,7 +530,7 @@ async function saveState(){
   if(!hasClaudeStorage){
     try{
       if(!hasLocalStorage()) throw new Error('localStorage indisponível');
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ people: state.people, expenses: state.expenses }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ people: state.people, expenses: state.expenses, payments: state.payments || [] }));
       storageAvailable = true;
       updateSaveNote('salvo');
     }catch(e){
@@ -505,7 +544,7 @@ async function saveState(){
   const maxAttempts = 3;
   for(let attempt = 1; attempt <= maxAttempts; attempt++){
     try{
-      await window.storage.set(STORAGE_KEY, JSON.stringify({ people: state.people, expenses: state.expenses }), false);
+      await window.storage.set(STORAGE_KEY, JSON.stringify({ people: state.people, expenses: state.expenses, payments: state.payments || [] }), false);
       storageAvailable = true;
       updateSaveNote('salvo');
       return;
@@ -552,6 +591,7 @@ function removePerson(name){
   // remove this person from any expense they're tied to
   state.expenses = state.expenses.filter(e => e.payer !== name);
   state.expenses.forEach(e => { e.participants = e.participants.filter(p => p !== name); });
+  state.payments = (state.payments || []).filter(p => p.from !== name && p.to !== name);
   saveState();
   renderAll();
 }
@@ -572,7 +612,7 @@ function toggleParticipant(name){
 
 function addExpense(){
   const desc = document.getElementById('descInput').value.trim();
-  const amount = parseFloat(document.getElementById('amountInput').value);
+  const amount = parseCurrencyInput(document.getElementById('amountInput').value);
   const payer = document.getElementById('payerSelect').value;
   const participants = [...state.activeParticipants];
 
@@ -602,7 +642,7 @@ function removeExpense(id){
 
 function resetAll(){
   if(!confirm('Isso apaga pessoas e gastos salvos. Continuar?')) return;
-  state = { people: [], expenses: [], activeParticipants: [] };
+  state = { people: [], expenses: [], activeParticipants: [], payments: [] };
   saveState();
   renderAll();
 }
@@ -624,6 +664,30 @@ function computeBalances(){
     });
   });
   return balances;
+}
+
+// Saldos já descontando os pagamentos marcados como feitos
+function computeRemainingBalances(){
+  const balances = computeBalances();
+  (state.payments || []).forEach(p => {
+    if(balances[p.from] === undefined || balances[p.to] === undefined) return;
+    balances[p.from] += p.amount; // quem pagou deve menos agora
+    balances[p.to] -= p.amount;   // quem recebeu tem menos a receber agora
+  });
+  return balances;
+}
+
+function markPaymentDone(from, to, amount){
+  state.payments = state.payments || [];
+  state.payments.push({ id: Date.now(), from, to, amount });
+  saveState();
+  renderAll();
+}
+
+function undoPayment(id){
+  state.payments = (state.payments || []).filter(p => p.id !== id);
+  saveState();
+  renderAll();
 }
 
 function computeSettlements(balances){
@@ -736,7 +800,7 @@ function renderBalances(){
     card.innerHTML = '<p class="empty-hint">Nada para calcular ainda.</p>';
     return;
   }
-  const balances = computeBalances();
+  const balances = computeRemainingBalances();
   state.people.forEach(name => {
     const val = balances[name];
     const row = document.createElement('div');
@@ -755,10 +819,12 @@ function renderSettlements(){
     box.innerHTML = '<p class="all-settled">Registre gastos para ver as transferências.</p>';
     return;
   }
-  const balances = computeBalances();
+  const balances = computeRemainingBalances();
   const txns = computeSettlements(balances);
   if(txns.length === 0){
-    box.innerHTML = '<p class="all-settled">Ninguém deve nada — tudo certo entre vocês.</p>';
+    const hasHistory = (state.payments || []).length > 0;
+    box.innerHTML = `<p class="all-settled">${hasHistory ? 'Tudo pago — as contas estão zeradas! 🎉' : 'Ninguém deve nada — tudo certo entre vocês.'}</p>`;
+    renderPaymentHistory();
     return;
   }
   txns.forEach(t => {
@@ -767,9 +833,47 @@ function renderSettlements(){
     row.innerHTML = `
       <span class="who"><b>${escapeHtml(t.from)}</b> paga <b>${escapeHtml(t.to)}</b></span>
       <span class="amt">${fmt(t.amount)}</span>
+      <button class="pay-btn" type="button">Pago</button>
     `;
+    row.querySelector('.pay-btn').onclick = () => {
+      if(confirm(`Confirmar que ${t.from} já pagou ${fmt(t.amount)} para ${t.to}?`)){
+        markPaymentDone(t.from, t.to, t.amount);
+      }
+    };
     box.appendChild(row);
   });
+  renderPaymentHistory();
+}
+
+function renderPaymentHistory(){
+  const existing = document.getElementById('paymentHistory');
+  if(existing) existing.remove();
+  const payments = state.payments || [];
+  if(payments.length === 0) return;
+
+  const wrap = document.createElement('div');
+  wrap.id = 'paymentHistory';
+  wrap.style.marginTop = '14px';
+
+  const title = document.createElement('p');
+  title.style.cssText = 'font-size:12.5px; color:rgba(246,241,227,0.55); margin:0 0 8px;';
+  title.textContent = 'Já pago:';
+  wrap.appendChild(title);
+
+  payments.forEach(p => {
+    const row = document.createElement('div');
+    row.className = 'settle-row';
+    row.style.opacity = '0.6';
+    row.innerHTML = `
+      <span class="who"><b>${escapeHtml(p.from)}</b> pagou <b>${escapeHtml(p.to)}</b></span>
+      <span class="amt">${fmt(p.amount)}</span>
+      <button class="pay-btn undo" type="button">Desfazer</button>
+    `;
+    row.querySelector('.undo').onclick = () => undoPayment(p.id);
+    wrap.appendChild(row);
+  });
+
+  document.getElementById('settlements').after(wrap);
 }
 
 const svgNS = 'http://www.w3.org/2000/svg';
@@ -798,7 +902,7 @@ function renderMoneyFlow(){
     box.innerHTML = '<p class="all-settled">Registre gastos para ver a rota.</p>';
     return;
   }
-  const balances = computeBalances();
+  const balances = computeRemainingBalances();
   const txns = computeSettlements(balances);
   if(txns.length === 0){
     box.innerHTML = '<p class="all-settled">Ninguém deve nada — tudo certo entre vocês.</p>';
