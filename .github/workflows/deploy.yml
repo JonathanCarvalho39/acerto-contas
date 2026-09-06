@@ -1,0 +1,49 @@
+name: Deploy para GitHub Pages
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Garantir que existe um index.html
+        run: |
+          if [ ! -f index.html ]; then
+            first_html=$(find . -maxdepth 1 -name "*.html" | head -n 1)
+            if [ -n "$first_html" ]; then
+              echo "Nenhum index.html encontrado, usando $first_html"
+              cp "$first_html" index.html
+            else
+              echo "Nenhum arquivo .html encontrado na raiz do repositório." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Configurar GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Empacotar site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Publicar no GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
