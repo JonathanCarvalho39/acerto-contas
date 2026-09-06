@@ -425,7 +425,7 @@
   <section>
     <h2>Rota do dinheiro</h2>
     <p style="font-size:13px; color:rgba(246,241,227,0.6); margin:-4px 0 14px; line-height:1.5;">
-      As setas mostram apenas o caminho mais curto para zerar as contas — não indicam qual despesa específica cada pessoa está pagando.
+      Toque em uma pessoa para abrir a rota dela — mostra só o caminho mais curto pra zerar as contas, não necessariamente qual despesa específica está sendo paga.
     </p>
     <div id="moneyFlow"></div>
   </section>
@@ -772,10 +772,22 @@ function renderSettlements(){
   });
 }
 
-let openFlowPerson = null;
+const svgNS = 'http://www.w3.org/2000/svg';
 
-function toggleFlow(name){
-  openFlowPerson = (openFlowPerson === name) ? null : name;
+function svgEl(tag, attrs){
+  const el = document.createElementNS(svgNS, tag);
+  Object.keys(attrs || {}).forEach(k => el.setAttribute(k, attrs[k]));
+  return el;
+}
+
+let selectedFlowNode = null; // { name, type: 'debtor' | 'creditor' }
+
+function toggleFlowNode(name, type){
+  if(selectedFlowNode && selectedFlowNode.name === name && selectedFlowNode.type === type){
+    selectedFlowNode = null;
+  } else {
+    selectedFlowNode = { name, type };
+  }
   renderMoneyFlow();
 }
 
@@ -794,41 +806,106 @@ function renderMoneyFlow(){
   }
 
   const debtorNames = [];
-  txns.forEach(t => { if(!debtorNames.includes(t.from)) debtorNames.push(t.from); });
+  const creditorNames = [];
+  txns.forEach(t => {
+    if(!debtorNames.includes(t.from)) debtorNames.push(t.from);
+    if(!creditorNames.includes(t.to)) creditorNames.push(t.to);
+  });
+
+  const rowH = 44;
+  const topPad = 14;
+  const rows = Math.max(debtorNames.length, creditorNames.length);
+  const height = topPad * 2 + rowH * rows;
+  const width = 300;
+  const nodeW = 98;
+  const nodeH = 34;
+  const leftX = 4;
+  const rightX = width - 4 - nodeW;
+
+  const debtorY = {};
+  debtorNames.forEach((n, i) => { debtorY[n] = topPad + rowH * i + rowH / 2; });
+  const creditorY = {};
+  creditorNames.forEach((n, i) => { creditorY[n] = topPad + rowH * i + rowH / 2; });
+
+  const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', style: 'display:block;' });
+
+  if(selectedFlowNode){
+    const relevant = txns.filter(t =>
+      (selectedFlowNode.type === 'debtor' && t.from === selectedFlowNode.name) ||
+      (selectedFlowNode.type === 'creditor' && t.to === selectedFlowNode.name)
+    );
+    relevant.forEach(t => {
+      const y1 = debtorY[t.from], y2 = creditorY[t.to];
+      const x1 = leftX + nodeW, x2 = rightX;
+      const midX = (x1 + x2) / 2;
+      svg.appendChild(svgEl('path', {
+        d: `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`,
+        fill: 'none', stroke: '#D9A441', 'stroke-width': '2.4', opacity: '0.9'
+      }));
+      const midY = (y1 + y2) / 2;
+      const label = fmt(t.amount);
+      const labelW = 20 + label.length * 5.2;
+      svg.appendChild(svgEl('rect', {
+        x: midX - labelW / 2, y: midY - 10, width: labelW, height: 19, rx: '9.5',
+        fill: '#0C1F2E', stroke: '#D9A441', 'stroke-width': '1'
+      }));
+      const text = svgEl('text', {
+        x: midX, y: midY + 4, 'text-anchor': 'middle',
+        'font-family': "'IBM Plex Mono', monospace", 'font-size': '10',
+        fill: '#F6F1E3', 'font-weight': '600'
+      });
+      text.textContent = label;
+      svg.appendChild(text);
+    });
+  }
 
   debtorNames.forEach(name => {
-    const myTxns = txns.filter(t => t.from === name);
-    const total = myTxns.reduce((s,t) => s + t.amount, 0);
-    const isOpen = openFlowPerson === name;
-
-    const item = document.createElement('div');
-    item.className = 'flow-item' + (isOpen ? ' open' : '');
-
-    const header = document.createElement('button');
-    header.className = 'flow-header';
-    header.innerHTML = `
-      <span class="fname">${escapeHtml(name)}</span>
-      <span class="fright">
-        <span class="ftotal">paga ${fmt(total)}</span>
-        <span class="fchevron">▾</span>
-      </span>
-    `;
-    header.onclick = () => toggleFlow(name);
-
-    const body = document.createElement('div');
-    body.className = 'flow-body';
-    body.innerHTML = myTxns.map(t => `
-      <div class="flow-route">
-        <span class="farrow">→</span>
-        <span class="fto">${escapeHtml(t.to)}</span>
-        <span class="famt">${fmt(t.amount)}</span>
-      </div>
-    `).join('');
-
-    item.appendChild(header);
-    item.appendChild(body);
-    box.appendChild(item);
+    const y = debtorY[name];
+    const total = txns.filter(t => t.from === name).reduce((s,t) => s + t.amount, 0);
+    const isSel = !!selectedFlowNode && selectedFlowNode.type === 'debtor' && selectedFlowNode.name === name;
+    const isLinked = !!selectedFlowNode && selectedFlowNode.type === 'creditor' && txns.some(t => t.from === name && t.to === selectedFlowNode.name);
+    const isDimmed = !!selectedFlowNode && !isSel && !isLinked;
+    appendFlowNode(svg, leftX, y, nodeW, nodeH, name, `paga ${fmt(total)}`, '#F0A98B', isSel, isDimmed, 'debtor');
   });
+
+  creditorNames.forEach(name => {
+    const y = creditorY[name];
+    const total = txns.filter(t => t.to === name).reduce((s,t) => s + t.amount, 0);
+    const isSel = !!selectedFlowNode && selectedFlowNode.type === 'creditor' && selectedFlowNode.name === name;
+    const isLinked = !!selectedFlowNode && selectedFlowNode.type === 'debtor' && txns.some(t => t.to === name && t.from === selectedFlowNode.name);
+    const isDimmed = !!selectedFlowNode && !isSel && !isLinked;
+    appendFlowNode(svg, rightX, y, nodeW, nodeH, name, `recebe ${fmt(total)}`, '#3C6E52', isSel, isDimmed, 'creditor');
+  });
+
+  box.appendChild(svg);
+}
+
+function appendFlowNode(svg, x, y, w, h, name, sub, subColor, isSel, isDimmed, type){
+  const ry = y - h / 2;
+  const g = svgEl('g', { style: 'cursor:pointer;' });
+  g.appendChild(svgEl('rect', {
+    x, y: ry, width: w, height: h, rx: '7',
+    fill: isSel ? '#FBEFD2' : '#F6F1E3',
+    stroke: isSel ? '#D9A441' : 'rgba(27,53,71,0.15)',
+    'stroke-width': isSel ? '2' : '1',
+    opacity: isDimmed ? '0.35' : '1'
+  }));
+  const t1 = svgEl('text', {
+    x: x + w / 2, y: ry + 14, 'text-anchor': 'middle',
+    'font-family': 'Inter, sans-serif', 'font-size': '10.5', 'font-weight': '600',
+    fill: '#1B3547', opacity: isDimmed ? '0.55' : '1'
+  });
+  t1.textContent = name;
+  const t2 = svgEl('text', {
+    x: x + w / 2, y: ry + 27, 'text-anchor': 'middle',
+    'font-family': "'IBM Plex Mono', monospace", 'font-size': '9.5', 'font-weight': '600',
+    fill: subColor, opacity: isDimmed ? '0.55' : '1'
+  });
+  t2.textContent = sub;
+  g.appendChild(t1);
+  g.appendChild(t2);
+  g.addEventListener('click', () => toggleFlowNode(name, type));
+  svg.appendChild(g);
 }
 
 function escapeHtml(str){
