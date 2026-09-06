@@ -695,6 +695,88 @@ function renderSettlements(){
   });
 }
 
+function renderMoneyFlow(){
+  const box = document.getElementById('moneyFlow');
+  box.innerHTML = '';
+  if(state.people.length === 0 || state.expenses.length === 0){
+    box.innerHTML = '<p class="all-settled">Registre gastos para ver o diagrama.</p>';
+    return;
+  }
+  const balances = computeBalances();
+  const txns = computeSettlements(balances);
+  if(txns.length === 0){
+    box.innerHTML = '<p class="all-settled">Ninguém deve nada — tudo certo entre vocês.</p>';
+    return;
+  }
+
+  // ordem de aparição: quem paga (esquerda) e quem recebe (direita)
+  const debtorNames = [];
+  const creditorNames = [];
+  txns.forEach(t => {
+    if(!debtorNames.includes(t.from)) debtorNames.push(t.from);
+    if(!creditorNames.includes(t.to)) creditorNames.push(t.to);
+  });
+
+  const rowH = 62;
+  const topPad = 26;
+  const rows = Math.max(debtorNames.length, creditorNames.length);
+  const height = topPad * 2 + rowH * rows;
+  const width = 340;
+  const nodeW = 122;
+  const nodeH = 46;
+  const leftX = 6;
+  const rightX = width - 6 - nodeW;
+
+  const debtorY = {};
+  debtorNames.forEach((name, i) => { debtorY[name] = topPad + rowH * i + rowH/2; });
+  const creditorY = {};
+  creditorNames.forEach((name, i) => { creditorY[name] = topPad + rowH * i + rowH/2; });
+
+  let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" style="display:block; overflow:visible;">`;
+
+  txns.forEach(t => {
+    const y1 = debtorY[t.from];
+    const y2 = creditorY[t.to];
+    const x1 = leftX + nodeW;
+    const x2 = rightX;
+    const midX = (x1 + x2) / 2;
+    svg += `<path d="M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}" fill="none" stroke="#D9A441" stroke-width="2" opacity="0.7" />`;
+    const midY = (y1 + y2) / 2;
+    const label = fmt(t.amount);
+    const labelW = 22 + label.length * 5.4;
+    svg += `<rect x="${midX - labelW/2}" y="${midY - 11}" width="${labelW}" height="21" rx="10.5" fill="#0C1F2E" stroke="#D9A441" stroke-width="1" opacity="0.95" />`;
+    svg += `<text x="${midX}" y="${midY + 4}" text-anchor="middle" font-family="'IBM Plex Mono', monospace" font-size="11" fill="#F6F1E3" font-weight="600">${escapeHtmlSvg(label)}</text>`;
+  });
+
+  debtorNames.forEach(name => {
+    const y = debtorY[name];
+    const total = txns.filter(t => t.from === name).reduce((s,t) => s + t.amount, 0);
+    svg += svgNode(leftX, y, nodeW, nodeH, name, `paga ${fmt(total)}`, '#F0A98B');
+  });
+
+  creditorNames.forEach(name => {
+    const y = creditorY[name];
+    const total = txns.filter(t => t.to === name).reduce((s,t) => s + t.amount, 0);
+    svg += svgNode(rightX, y, nodeW, nodeH, name, `recebe ${fmt(total)}`, '#3C6E52');
+  });
+
+  svg += `</svg>`;
+  box.innerHTML = svg;
+}
+
+function svgNode(x, y, w, h, name, sub, subColor){
+  const ry = y - h/2;
+  return `
+    <rect x="${x}" y="${ry}" width="${w}" height="${h}" rx="7" fill="#F6F1E3" stroke="rgba(27,53,71,0.15)" />
+    <text x="${x + w/2}" y="${ry + 19}" text-anchor="middle" font-family="Inter, sans-serif" font-size="12.5" font-weight="600" fill="#1B3547">${escapeHtmlSvg(name)}</text>
+    <text x="${x + w/2}" y="${ry + 35}" text-anchor="middle" font-family="'IBM Plex Mono', monospace" font-size="10.5" font-weight="600" fill="${subColor}">${escapeHtmlSvg(sub)}</text>
+  `;
+}
+
+function escapeHtmlSvg(str){
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 function escapeHtml(str){
   const d = document.createElement('div');
   d.textContent = str;
@@ -708,6 +790,7 @@ function renderAll(){
   renderExpenses();
   renderBalances();
   renderSettlements();
+  renderMoneyFlow();
 }
 
 document.getElementById('personInput').addEventListener('keydown', (e) => {
