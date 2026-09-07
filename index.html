@@ -157,6 +157,18 @@
     border-color: var(--ink);
     color: var(--paper);
   }
+  .part-toggle.is-payer{
+    border: 2px solid var(--gold-deep);
+    padding: 6px 11px;
+  }
+  .part-toggle.is-payer::after{
+    content: " 💰";
+    font-size: 11px;
+  }
+  .part-toggle.on.is-payer{
+    background: var(--ink);
+    border-color: var(--gold-deep);
+  }
 
   .btn{
     display:inline-block;
@@ -254,8 +266,8 @@
     font-weight:600;
     font-size:14px;
   }
-  .val.pos{ color: #8FD4AC; }
-  .val.neg{ color: #F0A98B; }
+  .val.pos{ color: #2F6B4E; }
+  .val.neg{ color: #F0A98B; font-weight: 800; }
 
   .settle-row{
     display:flex; align-items:center; gap:10px; flex-wrap: wrap;
@@ -291,11 +303,72 @@
     color: var(--ink-soft);
     border: 1px solid rgba(27,53,71,0.25);
   }
+  .pay-btn.confirming{
+    background: var(--rust);
+  }
 
   .all-settled{
     color: rgba(246,241,227,0.7);
     font-size: 14px;
     padding: 8px 4px;
+  }
+
+  /* gráfico de custos */
+  .cost-total{
+    text-align:center;
+    font-family:'Inter', sans-serif;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    margin-bottom: 18px;
+    padding-bottom: 16px;
+    border-bottom: 1px dashed rgba(27,53,71,0.15);
+  }
+  .cost-total span{
+    display:block;
+    font-family:'Fraunces', serif;
+    font-weight:700;
+    font-size: 26px;
+    color: var(--ink);
+    margin-top: 4px;
+  }
+  .cost-bar-row{ margin-bottom: 14px; }
+  .cost-bar-row:last-child{ margin-bottom: 0; }
+  .cost-bar-label{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    font-size: 13px;
+    margin-bottom: 5px;
+    gap: 8px;
+  }
+  .cost-bar-name{
+    color: var(--ink);
+    font-weight:500;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .cost-bar-amt{
+    font-family:'IBM Plex Mono', monospace;
+    font-weight:600;
+    font-size: 12.5px;
+    color: var(--ink);
+    white-space:nowrap;
+  }
+  .cost-bar-pct{
+    color: var(--ink-soft);
+    font-weight:500;
+  }
+  .cost-bar-track{
+    background: rgba(27,53,71,0.08);
+    border-radius: 4px;
+    height: 9px;
+    overflow:hidden;
+  }
+  .cost-bar-fill{
+    background: var(--gold-deep);
+    height: 100%;
+    border-radius: 4px;
   }
 
   /* accordion - rota do dinheiro */
@@ -418,7 +491,7 @@
       <input type="text" inputmode="numeric" id="amountInput" placeholder="0,00" oninput="maskCurrency(this)">
 
       <label for="payerSelect">Quem pagou</label>
-      <select id="payerSelect"></select>
+      <select id="payerSelect" onchange="ensurePayerIncluded()"></select>
 
       <div style="display:flex; align-items:baseline; justify-content:space-between;">
         <label style="margin:12px 0 5px;">Dividir entre</label>
@@ -438,6 +511,11 @@
   </section>
 
   <section>
+    <h2>Custos da viagem</h2>
+    <div class="card" id="costChart"></div>
+  </section>
+
+  <section>
     <h2>Saldo de cada um</h2>
     <div class="card" id="balancesCard"></div>
   </section>
@@ -450,13 +528,21 @@
   <section>
     <h2>Rota do dinheiro</h2>
     <p style="font-size:13px; color:rgba(246,241,227,0.6); margin:-4px 0 14px; line-height:1.5;">
-      Toque em uma pessoa para abrir a rota dela — mostra só o caminho mais curto pra zerar as contas, não necessariamente qual despesa específica está sendo paga.
+      Toque em uma pessoa para abrir a rota dela. Linhas <b style="color:#D9A441;">douradas</b> são pendentes, linhas <b style="color:#5FAE84;">verdes</b> já foram pagas.
     </p>
     <div id="moneyFlow"></div>
   </section>
 
+  <section>
+    <h2>Quanto cada um gastou</h2>
+    <p style="font-size:13px; color:rgba(246,241,227,0.6); margin:-4px 0 14px; line-height:1.5;">
+      O total que cada pessoa efetivamente consumiu na viagem, somando a fatia dela em cada despesa — independente de quem adiantou o pagamento.
+    </p>
+    <div class="card" id="consumptionCard"></div>
+  </section>
+
   <div class="footer-actions">
-    <button class="btn ghost" onclick="resetAll()">Limpar tudo e recomeçar</button>
+    <button class="btn ghost" id="resetBtn" onclick="handleResetClick()">Limpar tudo e recomeçar</button>
     <p class="save-note" id="saveNote">Seus dados são salvos automaticamente neste dispositivo.</p>
   </div>
 
@@ -629,7 +715,7 @@ function addExpense(){
 
   if(!desc){ alert('Dá um nome pro gasto.'); return; }
   if(!amount || amount <= 0){ alert('Coloca um valor válido.'); return; }
-  if(!payer){ alert('Adicione pessoas primeiro.'); return; }
+  if(!payer){ alert('Escolha quem pagou.'); return; }
   if(participants.length === 0){ alert('Escolha quem participa desse gasto.'); return; }
 
   if(editingExpenseId){
@@ -650,6 +736,7 @@ function addExpense(){
 
   document.getElementById('descInput').value = '';
   document.getElementById('amountInput').value = '';
+  document.getElementById('payerSelect').value = '';
   state.activeParticipants = [];
 
   updateFormModeUI();
@@ -678,6 +765,7 @@ function cancelEditExpense(){
   editingExpenseId = null;
   document.getElementById('descInput').value = '';
   document.getElementById('amountInput').value = '';
+  document.getElementById('payerSelect').value = '';
   state.activeParticipants = [];
   renderParticipants();
   updateFormModeUI();
@@ -708,8 +796,24 @@ function removeExpense(id){
   renderAll();
 }
 
+function handleResetClick(){
+  const btn = document.getElementById('resetBtn');
+  if(btn.dataset.confirming === 'true'){
+    clearTimeout(btn._resetTimer);
+    resetAll();
+    btn.dataset.confirming = 'false';
+    btn.textContent = 'Limpar tudo e recomeçar';
+  } else {
+    btn.dataset.confirming = 'true';
+    btn.textContent = 'Toque de novo pra confirmar';
+    btn._resetTimer = setTimeout(() => {
+      btn.dataset.confirming = 'false';
+      btn.textContent = 'Limpar tudo e recomeçar';
+    }, 3000);
+  }
+}
+
 function resetAll(){
-  if(!confirm('Isso apaga pessoas e gastos salvos. Continuar?')) return;
   state = { people: [], expenses: [], activeParticipants: [], payments: [] };
   saveState();
   renderAll();
@@ -732,6 +836,21 @@ function computeBalances(){
     });
   });
   return balances;
+}
+
+// Quanto cada pessoa consumiu de fato, somando a fatia dela em cada despesa
+// (não é o saldo — não descaba o que ela pagou, é só o "quanto ela gastou")
+function computeConsumption(){
+  const consumption = {};
+  state.people.forEach(p => consumption[p] = 0);
+  state.expenses.forEach(e => {
+    const share = e.amount / e.participants.length;
+    e.participants.forEach(p => {
+      if(consumption[p] === undefined) return;
+      consumption[p] += share;
+    });
+  });
+  return consumption;
 }
 
 // Saldos já descontando os pagamentos marcados como feitos
@@ -809,6 +928,11 @@ function renderPayerSelect(){
     sel.innerHTML = '<option value="">Adicione pessoas primeiro</option>';
     return;
   }
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Selecione quem pagou';
+  sel.appendChild(placeholder);
+
   state.people.forEach(name => {
     const opt = document.createElement('option');
     opt.value = name;
@@ -818,6 +942,14 @@ function renderPayerSelect(){
   if(state.people.includes(prev)) sel.value = prev;
 }
 
+function ensurePayerIncluded(){
+  const payer = document.getElementById('payerSelect').value;
+  if(payer && !state.activeParticipants.includes(payer)){
+    state.activeParticipants.push(payer);
+  }
+  renderParticipants();
+}
+
 function renderParticipants(){
   const box = document.getElementById('participantsBox');
   box.innerHTML = '';
@@ -825,9 +957,13 @@ function renderParticipants(){
     box.innerHTML = '<p class="empty-hint">Adicione pessoas primeiro.</p>';
     return;
   }
+  const payer = document.getElementById('payerSelect').value;
   state.people.forEach(name => {
     const el = document.createElement('div');
-    el.className = 'part-toggle' + (state.activeParticipants.includes(name) ? ' on' : '');
+    let cls = 'part-toggle';
+    if(state.activeParticipants.includes(name)) cls += ' on';
+    if(name === payer && payer !== '') cls += ' is-payer';
+    el.className = cls;
     el.textContent = name;
     el.onclick = () => toggleParticipant(name);
     box.appendChild(el);
@@ -865,6 +1001,39 @@ function renderExpenses(){
   });
 }
 
+function renderCostChart(){
+  const box = document.getElementById('costChart');
+  box.innerHTML = '';
+  if(state.expenses.length === 0){
+    box.innerHTML = '<p class="empty-hint">Registre gastos para ver o gráfico.</p>';
+    return;
+  }
+
+  const total = state.expenses.reduce((s,e) => s + e.amount, 0);
+  const max = Math.max(...state.expenses.map(e => e.amount));
+
+  const totalEl = document.createElement('div');
+  totalEl.className = 'cost-total';
+  totalEl.innerHTML = `Total da viagem<br><span>${fmt(total)}</span>`;
+  box.appendChild(totalEl);
+
+  const sorted = [...state.expenses].sort((a,b) => b.amount - a.amount);
+  sorted.forEach(e => {
+    const pct = max > 0 ? (e.amount / max * 100) : 0;
+    const sharePct = total > 0 ? (e.amount / total * 100) : 0;
+    const row = document.createElement('div');
+    row.className = 'cost-bar-row';
+    row.innerHTML = `
+      <div class="cost-bar-label">
+        <span class="cost-bar-name">${escapeHtml(e.desc)}</span>
+        <span class="cost-bar-amt">${fmt(e.amount)} <span class="cost-bar-pct">(${sharePct.toFixed(0)}%)</span></span>
+      </div>
+      <div class="cost-bar-track"><div class="cost-bar-fill" style="width:${pct}%;"></div></div>
+    `;
+    box.appendChild(row);
+  });
+}
+
 function renderBalances(){
   const card = document.getElementById('balancesCard');
   card.innerHTML = '';
@@ -882,6 +1051,32 @@ function renderBalances(){
     row.innerHTML = `<span class="name">${escapeHtml(name)}</span><span class="val ${cls}">${label}</span>`;
     card.appendChild(row);
   });
+}
+
+function renderConsumption(){
+  const card = document.getElementById('consumptionCard');
+  card.innerHTML = '';
+  if(state.people.length === 0 || state.expenses.length === 0){
+    card.innerHTML = '<p class="empty-hint">Registre gastos para ver o consumo de cada um.</p>';
+    return;
+  }
+  const consumption = computeConsumption();
+  const total = Object.values(consumption).reduce((s,v) => s + v, 0);
+
+  const sortedNames = [...state.people].sort((a,b) => consumption[b] - consumption[a]);
+  sortedNames.forEach(name => {
+    const val = consumption[name] || 0;
+    const row = document.createElement('div');
+    row.className = 'balance-row';
+    row.innerHTML = `<span class="name">${escapeHtml(name)}</span><span class="val" style="color:var(--ink); font-weight:700;">${fmt(val)}</span>`;
+    card.appendChild(row);
+  });
+
+  const totalRow = document.createElement('div');
+  totalRow.className = 'balance-row';
+  totalRow.style.cssText = 'border-top: 2px solid rgba(27,53,71,0.15); margin-top:6px; padding-top:14px;';
+  totalRow.innerHTML = `<span class="name" style="font-weight:700;">Total da viagem</span><span class="val" style="color:var(--ink); font-weight:800;">${fmt(total)}</span>`;
+  card.appendChild(totalRow);
 }
 
 function renderSettlements(){
@@ -907,9 +1102,20 @@ function renderSettlements(){
       <span class="amt">${fmt(t.amount)}</span>
       <button class="pay-btn" type="button">Pago</button>
     `;
-    row.querySelector('.pay-btn').onclick = () => {
-      if(confirm(`Confirmar que ${t.from} já pagou ${fmt(t.amount)} para ${t.to}?`)){
+    const btn = row.querySelector('.pay-btn');
+    btn.onclick = () => {
+      if(btn.dataset.confirming === 'true'){
+        clearTimeout(btn._resetTimer);
         markPaymentDone(t.from, t.to, t.amount);
+      } else {
+        btn.dataset.confirming = 'true';
+        btn.textContent = 'Confirmar?';
+        btn.classList.add('confirming');
+        btn._resetTimer = setTimeout(() => {
+          btn.dataset.confirming = 'false';
+          btn.textContent = 'Pago';
+          btn.classList.remove('confirming');
+        }, 3000);
       }
     };
     box.appendChild(row);
@@ -976,16 +1182,23 @@ function renderMoneyFlow(){
   }
   const balances = computeRemainingBalances();
   const txns = computeSettlements(balances);
-  if(txns.length === 0){
+  const payments = state.payments || [];
+
+  if(txns.length === 0 && payments.length === 0){
     box.innerHTML = '<p class="all-settled">Ninguém deve nada — tudo certo entre vocês.</p>';
     return;
   }
 
+  // nós = qualquer pessoa que aparece pendente OU já pagou/recebeu algo
   const debtorNames = [];
   const creditorNames = [];
   txns.forEach(t => {
     if(!debtorNames.includes(t.from)) debtorNames.push(t.from);
     if(!creditorNames.includes(t.to)) creditorNames.push(t.to);
+  });
+  payments.forEach(p => {
+    if(!debtorNames.includes(p.from)) debtorNames.push(p.from);
+    if(!creditorNames.includes(p.to)) creditorNames.push(p.to);
   });
 
   const rowH = 44;
@@ -1005,61 +1218,83 @@ function renderMoneyFlow(){
 
   const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, width: '100%', style: 'display:block;' });
 
+  function drawLine(t, color){
+    const y1 = debtorY[t.from], y2 = creditorY[t.to];
+    const x1 = leftX + nodeW, x2 = rightX;
+    const midX = (x1 + x2) / 2;
+    svg.appendChild(svgEl('path', {
+      d: `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`,
+      fill: 'none', stroke: color, 'stroke-width': '2.2', opacity: '0.9'
+    }));
+  }
+
+  function drawLabel(t, color){
+    const y1 = debtorY[t.from], y2 = creditorY[t.to];
+    const x1 = leftX + nodeW, x2 = rightX;
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
+    const label = fmt(t.amount);
+    const labelW = 12 + label.length * 3.5;
+    svg.appendChild(svgEl('rect', {
+      x: midX - labelW / 2, y: midY - 7, width: labelW, height: 13, rx: '6.5',
+      fill: '#0C1F2E', stroke: color, 'stroke-width': '1'
+    }));
+    const text = svgEl('text', {
+      x: midX, y: midY + 2.6, 'text-anchor': 'middle',
+      'font-family': "'IBM Plex Mono', monospace", 'font-size': '7',
+      fill: '#F6F1E3', 'font-weight': '600'
+    });
+    text.textContent = label;
+    svg.appendChild(text);
+  }
+
   if(selectedFlowNode){
-    const relevant = txns.filter(t =>
+    const relevantPending = txns.filter(t =>
       (selectedFlowNode.type === 'debtor' && t.from === selectedFlowNode.name) ||
       (selectedFlowNode.type === 'creditor' && t.to === selectedFlowNode.name)
     );
+    const relevantPaid = payments.filter(p =>
+      (selectedFlowNode.type === 'debtor' && p.from === selectedFlowNode.name) ||
+      (selectedFlowNode.type === 'creditor' && p.to === selectedFlowNode.name)
+    );
 
-    // 1) todas as linhas primeiro
-    relevant.forEach(t => {
-      const y1 = debtorY[t.from], y2 = creditorY[t.to];
-      const x1 = leftX + nodeW, x2 = rightX;
-      const midX = (x1 + x2) / 2;
-      svg.appendChild(svgEl('path', {
-        d: `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`,
-        fill: 'none', stroke: '#D9A441', 'stroke-width': '2.2', opacity: '0.9'
-      }));
-    });
+    // 1) todas as linhas primeiro (pendente = dourado, paga = verde)
+    relevantPending.forEach(t => drawLine(t, '#D9A441'));
+    relevantPaid.forEach(t => drawLine(t, '#3C6E52'));
 
     // 2) rótulos de valor por cima de todas as linhas, nunca embaixo
-    relevant.forEach(t => {
-      const y1 = debtorY[t.from], y2 = creditorY[t.to];
-      const x1 = leftX + nodeW, x2 = rightX;
-      const midX = (x1 + x2) / 2;
-      const midY = (y1 + y2) / 2;
-      const label = fmt(t.amount);
-      const labelW = 12 + label.length * 3.5;
-      svg.appendChild(svgEl('rect', {
-        x: midX - labelW / 2, y: midY - 7, width: labelW, height: 13, rx: '6.5',
-        fill: '#0C1F2E', stroke: '#D9A441', 'stroke-width': '1'
-      }));
-      const text = svgEl('text', {
-        x: midX, y: midY + 2.6, 'text-anchor': 'middle',
-        'font-family': "'IBM Plex Mono', monospace", 'font-size': '7',
-        fill: '#F6F1E3', 'font-weight': '600'
-      });
-      text.textContent = label;
-      svg.appendChild(text);
-    });
+    relevantPending.forEach(t => drawLabel(t, '#D9A441'));
+    relevantPaid.forEach(t => drawLabel(t, '#3C6E52'));
   }
 
   debtorNames.forEach(name => {
     const y = debtorY[name];
-    const total = txns.filter(t => t.from === name).reduce((s,t) => s + t.amount, 0);
+    const pending = txns.filter(t => t.from === name).reduce((s,t) => s + t.amount, 0);
+    const paid = payments.filter(p => p.from === name).reduce((s,p) => s + p.amount, 0);
     const isSel = !!selectedFlowNode && selectedFlowNode.type === 'debtor' && selectedFlowNode.name === name;
-    const isLinked = !!selectedFlowNode && selectedFlowNode.type === 'creditor' && txns.some(t => t.from === name && t.to === selectedFlowNode.name);
+    const isLinked = !!selectedFlowNode && selectedFlowNode.type === 'creditor' && (
+      txns.some(t => t.from === name && t.to === selectedFlowNode.name) ||
+      payments.some(p => p.from === name && p.to === selectedFlowNode.name)
+    );
     const isDimmed = !!selectedFlowNode && !isSel && !isLinked;
-    appendFlowNode(svg, leftX, y, nodeW, nodeH, name, `paga ${fmt(total)}`, '#F0A98B', isSel, isDimmed, 'debtor');
+    const sub = pending > 0.005 ? `paga ${fmt(pending)}` : (paid > 0.005 ? 'quitado ✓' : 'quitado ✓');
+    const subColor = pending > 0.005 ? '#F0A98B' : '#2F6B4E';
+    appendFlowNode(svg, leftX, y, nodeW, nodeH, name, sub, subColor, isSel, isDimmed, 'debtor');
   });
 
   creditorNames.forEach(name => {
     const y = creditorY[name];
-    const total = txns.filter(t => t.to === name).reduce((s,t) => s + t.amount, 0);
+    const pending = txns.filter(t => t.to === name).reduce((s,t) => s + t.amount, 0);
+    const paid = payments.filter(p => p.to === name).reduce((s,p) => s + p.amount, 0);
     const isSel = !!selectedFlowNode && selectedFlowNode.type === 'creditor' && selectedFlowNode.name === name;
-    const isLinked = !!selectedFlowNode && selectedFlowNode.type === 'debtor' && txns.some(t => t.to === name && t.from === selectedFlowNode.name);
+    const isLinked = !!selectedFlowNode && selectedFlowNode.type === 'debtor' && (
+      txns.some(t => t.to === name && t.from === selectedFlowNode.name) ||
+      payments.some(p => p.to === name && p.from === selectedFlowNode.name)
+    );
     const isDimmed = !!selectedFlowNode && !isSel && !isLinked;
-    appendFlowNode(svg, rightX, y, nodeW, nodeH, name, `recebe ${fmt(total)}`, '#3C6E52', isSel, isDimmed, 'creditor');
+    const sub = pending > 0.005 ? `recebe ${fmt(pending)}` : (paid > 0.005 ? 'quitado ✓' : 'quitado ✓');
+    const subColor = pending > 0.005 ? '#3C6E52' : '#2F6B4E';
+    appendFlowNode(svg, rightX, y, nodeW, nodeH, name, sub, subColor, isSel, isDimmed, 'creditor');
   });
 
   box.appendChild(svg);
@@ -1083,7 +1318,8 @@ function appendFlowNode(svg, x, y, w, h, name, sub, subColor, isSel, isDimmed, t
   t1.textContent = name;
   const t2 = svgEl('text', {
     x: x + w / 2, y: ry + 27, 'text-anchor': 'middle',
-    'font-family': "'IBM Plex Mono', monospace", 'font-size': '9.5', 'font-weight': '600',
+    'font-family': "'IBM Plex Mono', monospace", 'font-size': '9.5',
+    'font-weight': subColor === '#F0A98B' ? '800' : '600',
     fill: subColor, opacity: isDimmed ? '0.55' : '1'
   });
   t2.textContent = sub;
@@ -1104,9 +1340,11 @@ function renderAll(){
   renderPayerSelect();
   renderParticipants();
   renderExpenses();
+  renderCostChart();
   renderBalances();
   renderSettlements();
   renderMoneyFlow();
+  renderConsumption();
 }
 
 document.getElementById('personInput').addEventListener('keydown', (e) => {
