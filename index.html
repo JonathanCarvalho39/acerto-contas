@@ -864,7 +864,7 @@ function exportSummary(){
         .filter(e => e.payer === name && Array.isArray(e.participants) && e.participants.length > 1)
         .reduce((sum, e) => sum + e.amount, 0);
 
-      const consumed = (individualSummary.general[name] || 0) + (individualSummary.own[name] || 0);
+      const consumed = individualSummary.consumption[name] || 0;
       const balance = individualSummary.balances[name] || 0;
       const balanceLabel = balance > 0.005
         ? `A receber: ${fmt(balance)}`
