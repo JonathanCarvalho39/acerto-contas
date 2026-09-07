@@ -499,7 +499,7 @@
       <select id="payerSelect" onchange="ensurePayerIncluded()"></select>
 
       <div style="display:flex; align-items:baseline; justify-content:space-between;">
-        <label style="margin:12px 0 5px;">Dividir entre</label>
+        <label style="margin:12px 0 5px;">Quem consumiu</label>
         <button type="button" onclick="selectAllParticipants()" style="background:none;border:none;color:var(--gold-deep);font-size:12.5px;font-weight:600;cursor:pointer;padding:0;">selecionar todos</button>
       </div>
       <div class="participants" id="participantsBox"></div>
@@ -1098,7 +1098,9 @@ function renderExpenses(){
     row.innerHTML = `
       <div class="info">
         <div class="desc">${escapeHtml(e.desc)}</div>
-        <div class="meta">Pago por ${escapeHtml(e.payer)} · dividido entre ${e.participants.map(escapeHtml).join(', ')}</div>
+        <div class="meta">
+          Pago por ${escapeHtml(e.payer)} · consumido por ${e.participants.map(escapeHtml).join(', ')}
+        </div>
       </div>
       <div class="col">
         <div class="amt">${fmt(e.amount)}</div>
