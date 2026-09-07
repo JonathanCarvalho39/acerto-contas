@@ -858,6 +858,48 @@ function removeExpense(id){
 }
 
 function exportSummary(){
+    const individualSummary = computeIndividualSummary();
+    const individualRows = state.people.map(name => {
+      const advancedGeneral = state.expenses
+        .filter(e => e.payer === name && Array.isArray(e.participants) && e.participants.length > 1)
+        .reduce((sum, e) => sum + e.amount, 0);
+
+      const consumed = (individualSummary.general[name] || 0) + (individualSummary.own[name] || 0);
+      const balance = individualSummary.balances[name] || 0;
+      const balanceLabel = balance > 0.005
+        ? `A receber: ${fmt(balance)}`
+        : balance < -0.005
+          ? `A pagar: ${fmt(Math.abs(balance))}`
+          : 'Acerto: R$ 0,00';
+
+      return `
+        <tr>
+          <td>${escapeHtml(name)}</td>
+          <td>${fmt(advancedGeneral)}</td>
+          <td>${fmt(consumed)}</td>
+          <td>${balanceLabel}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const individualSummaryHtml = `
+      <section class="export-section">
+        <h2>Resumo individual dos gastos</h2>
+        <p>Separação entre o que cada pessoa adiantou para gastos gerais, o que efetivamente consumiu e o resultado do acerto.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Pessoa</th>
+              <th>Adiantou para geral</th>
+              <th>Parte no consumo</th>
+              <th>Acerto</th>
+            </tr>
+          </thead>
+          <tbody>${individualRows}</tbody>
+        </table>
+      </section>
+    `;
+
   if(state.expenses.length === 0){
     alert('Registre pelo menos um gasto antes de exportar.');
     return;
@@ -948,7 +990,7 @@ function exportSummary(){
   html += `</table>`;
 
   html += `<footer>Gerado pelo app Acerto de Contas.</footer>`;
-  html += `</body></html>`;
+  html += `${individualSummaryHtml}</body></html>`;
 
   w.document.open();
   w.document.write(html);
