@@ -186,6 +186,11 @@
     font-family: 'Inter', sans-serif;
   }
   .btn:active{ transform: translateY(1px); }
+  .btn:disabled{
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
   .btn.gold{ background: var(--gold-deep); }
   .btn.ghost{
     background: transparent;
@@ -485,7 +490,7 @@
     <h2 id="expenseFormHeading">Registrar gasto</h2>
     <div class="card">
       <label for="descInput">Descrição</label>
-      <input type="text" id="descInput" placeholder="Ex: Uber do aeroporto">
+      <input type="text" id="descInput" placeholder="Ex: Uber do aeroporto (opcional)">
 
       <label for="amountInput">Valor total (R$)</label>
       <input type="text" inputmode="numeric" id="amountInput" placeholder="0,00" oninput="maskCurrency(this)">
@@ -499,7 +504,7 @@
       </div>
       <div class="participants" id="participantsBox"></div>
 
-      <button class="btn gold" id="expenseSubmitBtn" onclick="addExpense()">Adicionar gasto</button>
+      <button class="btn gold" id="expenseSubmitBtn" onclick="addExpense()" disabled>Adicionar gasto</button>
       <button class="btn ghost" id="cancelEditBtn" style="display:none; margin-top:8px;" onclick="cancelEditExpense()">Cancelar edição</button>
     </div>
   </section>
@@ -542,6 +547,7 @@
   </section>
 
   <div class="footer-actions">
+    <button class="btn gold" id="exportBtn" onclick="exportSummary()">Exportar resumo (PDF)</button>
     <button class="btn ghost" id="resetBtn" onclick="handleResetClick()">Limpar tudo e recomeçar</button>
     <p class="save-note" id="saveNote">Seus dados são salvos automaticamente neste dispositivo.</p>
   </div>
@@ -708,12 +714,11 @@ function toggleParticipant(name){
 let editingExpenseId = null;
 
 function addExpense(){
-  const desc = document.getElementById('descInput').value.trim();
+  const desc = document.getElementById('descInput').value.trim() || 'Gasto sem descrição';
   const amount = parseCurrencyInput(document.getElementById('amountInput').value);
   const payer = document.getElementById('payerSelect').value;
   const participants = [...state.activeParticipants];
 
-  if(!desc){ alert('Dá um nome pro gasto.'); return; }
   if(!amount || amount <= 0){ alert('Coloca um valor válido.'); return; }
   if(!payer){ alert('Escolha quem pagou.'); return; }
   if(participants.length === 0){ alert('Escolha quem participa desse gasto.'); return; }
@@ -784,6 +789,13 @@ function updateFormModeUI(){
     cancelBtn.style.display = 'none';
     heading.textContent = 'Registrar gasto';
   }
+  updateSubmitButtonState();
+}
+
+function updateSubmitButtonState(){
+  const btn = document.getElementById('expenseSubmitBtn');
+  const payer = document.getElementById('payerSelect').value;
+  btn.disabled = !payer;
 }
 
 function removeExpense(id){
@@ -794,6 +806,106 @@ function removeExpense(id){
   state.expenses = state.expenses.filter(e => e.id !== id);
   saveState();
   renderAll();
+}
+
+function exportSummary(){
+  if(state.expenses.length === 0){
+    alert('Registre pelo menos um gasto antes de exportar.');
+    return;
+  }
+
+  const w = window.open('', '_blank');
+  if(!w){
+    alert('Não foi possível abrir a janela de exportação. Verifique se o navegador bloqueou pop-ups pra esse site e tente de novo.');
+    return;
+  }
+
+  const total = state.expenses.reduce((s,e) => s + e.amount, 0);
+  const consumption = computeConsumption();
+  const balances = computeRemainingBalances();
+  const txns = computeSettlements(balances);
+  const payments = state.payments || [];
+  const maxExp = Math.max(...state.expenses.map(e => e.amount), 0);
+  const dateStr = new Date().toLocaleString('pt-BR');
+
+  let html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<title>Resumo da viagem — Acerto de Contas</title>
+<style>
+  body{ font-family: Arial, Helvetica, sans-serif; color:#1B3547; padding:28px; max-width:720px; margin:0 auto; }
+  h1{ font-size:22px; margin:0 0 4px; }
+  .muted{ color:#7a8792; font-size:12px; margin-bottom:6px; }
+  h2{ font-size:15px; margin-top:30px; margin-bottom:10px; border-bottom:2px solid #D9A441; padding-bottom:6px; }
+  table{ width:100%; border-collapse:collapse; }
+  th,td{ text-align:left; padding:7px 6px; font-size:12.5px; border-bottom:1px solid #eee; }
+  th{ color:#7a8792; font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:.03em; }
+  .bar-row{ margin-bottom:12px; }
+  .bar-label{ display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px; }
+  .bar-track{ background:#eee; border-radius:4px; height:9px; overflow:hidden; }
+  .bar-fill{ background:#B4802E; height:100%; }
+  .pos{ color:#2F6B4E; font-weight:700; }
+  .neg{ color:#B23B22; font-weight:700; }
+  .total-box{ background:#F6F1E3; border:1px solid #eadfc4; border-radius:10px; padding:18px; text-align:center; margin:10px 0 20px; }
+  .total-box .lbl{ font-size:12px; color:#7a8792; }
+  .total-box .amt{ font-size:28px; font-weight:800; margin-top:2px; }
+  .tag{ font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px; }
+  .tag.pending{ background:#FBEFD2; color:#B4802E; }
+  .tag.paid{ background:#E1F0E6; color:#2F6B4E; }
+  footer{ margin-top:36px; font-size:11px; color:#a3aeb6; text-align:center; }
+  @media print{ body{ padding:12px; } h2{ break-inside: avoid; } table{ break-inside: avoid; } }
+</style></head><body>`;
+
+  html += `<h1>Acerto de Contas — Resumo da viagem</h1><p class="muted">Gerado em ${dateStr}</p>`;
+
+  html += `<h2>Custos da viagem</h2>`;
+  html += `<div class="total-box"><div class="lbl">Total gasto</div><div class="amt">${fmt(total)}</div></div>`;
+  [...state.expenses].sort((a,b) => b.amount - a.amount).forEach(e => {
+    const pct = maxExp > 0 ? (e.amount / maxExp * 100) : 0;
+    const share = total > 0 ? (e.amount / total * 100) : 0;
+    html += `<div class="bar-row"><div class="bar-label"><span>${escapeHtml(e.desc)}</span><span>${fmt(e.amount)} (${share.toFixed(0)}%)</span></div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;"></div></div></div>`;
+  });
+
+  html += `<h2>Gastos registrados</h2><table><tr><th>Descrição</th><th>Valor</th><th>Pago por</th><th>Dividido entre</th></tr>`;
+  state.expenses.forEach(e => {
+    html += `<tr><td>${escapeHtml(e.desc)}</td><td>${fmt(e.amount)}</td><td>${escapeHtml(e.payer)}</td><td>${e.participants.map(escapeHtml).join(', ')}</td></tr>`;
+  });
+  html += `</table>`;
+
+  html += `<h2>Quanto cada um gastou</h2><table><tr><th>Pessoa</th><th>Consumo total</th></tr>`;
+  [...state.people].sort((a,b) => (consumption[b]||0) - (consumption[a]||0)).forEach(name => {
+    html += `<tr><td>${escapeHtml(name)}</td><td>${fmt(consumption[name] || 0)}</td></tr>`;
+  });
+  html += `</table>`;
+
+  html += `<h2>Saldo de cada um</h2><table><tr><th>Pessoa</th><th>Situação</th></tr>`;
+  state.people.forEach(name => {
+    const val = balances[name] || 0;
+    let label = 'está quite', cls = '';
+    if(val >= 0.005){ label = `tem a receber ${fmt(val)}`; cls = 'pos'; }
+    else if(val <= -0.005){ label = `deve ${fmt(-val)}`; cls = 'neg'; }
+    html += `<tr><td>${escapeHtml(name)}</td><td class="${cls}">${label}</td></tr>`;
+  });
+  html += `</table>`;
+
+  html += `<h2>Quem deve pagar quem</h2><table><tr><th>De</th><th>Para</th><th>Valor</th><th>Status</th></tr>`;
+  txns.forEach(t => {
+    html += `<tr><td>${escapeHtml(t.from)}</td><td>${escapeHtml(t.to)}</td><td>${fmt(t.amount)}</td><td><span class="tag pending">pendente</span></td></tr>`;
+  });
+  payments.forEach(p => {
+    html += `<tr><td>${escapeHtml(p.from)}</td><td>${escapeHtml(p.to)}</td><td>${fmt(p.amount)}</td><td><span class="tag paid">pago</span></td></tr>`;
+  });
+  if(txns.length === 0 && payments.length === 0){
+    html += `<tr><td colspan="4">Nenhuma transferência registrada ainda.</td></tr>`;
+  }
+  html += `</table>`;
+
+  html += `<footer>Gerado pelo app Acerto de Contas.</footer>`;
+  html += `</body></html>`;
+
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+
+  setTimeout(() => { w.focus(); w.print(); }, 350);
 }
 
 function handleResetClick(){
@@ -926,6 +1038,7 @@ function renderPayerSelect(){
   sel.innerHTML = '';
   if(state.people.length === 0){
     sel.innerHTML = '<option value="">Adicione pessoas primeiro</option>';
+    updateSubmitButtonState();
     return;
   }
   const placeholder = document.createElement('option');
@@ -940,6 +1053,7 @@ function renderPayerSelect(){
     sel.appendChild(opt);
   });
   if(state.people.includes(prev)) sel.value = prev;
+  updateSubmitButtonState();
 }
 
 function ensurePayerIncluded(){
@@ -948,6 +1062,7 @@ function ensurePayerIncluded(){
     state.activeParticipants.push(payer);
   }
   renderParticipants();
+  updateSubmitButtonState();
 }
 
 function renderParticipants(){
