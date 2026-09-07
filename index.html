@@ -550,13 +550,19 @@
   </section>
 
   <section>
-    <h2>Gastos registrados</h2>
+    <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px;">
+      <h2 style="margin:0;">Gastos registrados</h2>
+      <button type="button" onclick="clearExpenseFilter()" id="clearFilterBtn" style="display:none; background:none;border:none;color:var(--gold-deep);font-size:12.5px;font-weight:600;cursor:pointer;padding:0;">limpar filtro</button>
+    </div>
+    <label for="expenseFilterSelect" style="display:block; font-size:12.5px; color:rgba(246,241,227,0.6); margin-bottom:6px;">Filtrar por quem pagou</label>
+    <select id="expenseFilterSelect" onchange="setExpenseFilter(this.value)" style="margin-bottom:16px;"></select>
     <div id="expensesList"></div>
     <p class="empty-hint" id="expensesEmpty">Nenhum gasto ainda.</p>
   </section>
 
   <section>
     <h2>Custos da viagem</h2>
+    <p id="costChartFilterNote" style="display:none; font-size:12.5px; color:rgba(246,241,227,0.6); margin:-4px 0 12px;"></p>
     <div class="card" id="costChart"></div>
   </section>
 
@@ -916,7 +922,10 @@ function exportSummary(){
   const balances = computeRemainingBalances();
   const txns = computeSettlements(balances);
   const payments = state.payments || [];
-  const maxExp = Math.max(...state.expenses.map(e => e.amount), 0);
+  const filteredExpenses = getFilteredExpenses();
+  const filterActive = expenseFilterPayer !== 'all';
+  const filteredTotal = filteredExpenses.reduce((s,e) => s + e.amount, 0);
+  const maxExp = Math.max(...filteredExpenses.map(e => e.amount), 0);
   const dateStr = new Date().toLocaleString('pt-BR');
 
   let html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
@@ -941,6 +950,7 @@ function exportSummary(){
   .tag{ font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px; }
   .tag.pending{ background:#FBEFD2; color:#B4802E; }
   .tag.paid{ background:#E1F0E6; color:#2F6B4E; }
+  .filter-note{ background:#FBEFD2; color:#8a5f1f; font-size:12px; font-weight:600; padding:8px 12px; border-radius:6px; margin:-4px 0 14px; display:inline-block; }
   footer{ margin-top:36px; font-size:11px; color:#a3aeb6; text-align:center; }
   @media print{ body{ padding:12px; } h2{ break-inside: avoid; } table{ break-inside: avoid; } }
 </style></head><body>`;
@@ -948,18 +958,29 @@ function exportSummary(){
   html += `<h1>Acerto de Contas — Resumo da viagem</h1><p class="muted">Gerado em ${dateStr}</p>`;
 
   html += `<h2>Custos da viagem</h2>`;
-  html += `<div class="total-box"><div class="lbl">Total gasto</div><div class="amt">${fmt(total)}</div></div>`;
-  [...state.expenses].sort((a,b) => b.amount - a.amount).forEach(e => {
+  if(filterActive){
+    html += `<div class="filter-note">Filtro aplicado: mostrando só gastos pagos por ${escapeHtml(expenseFilterPayer)}</div>`;
+  }
+  html += `<div class="total-box"><div class="lbl">${filterActive ? `Total pago por ${escapeHtml(expenseFilterPayer)}` : 'Total gasto'}</div><div class="amt">${fmt(filteredTotal)}</div></div>`;
+  [...filteredExpenses].sort((a,b) => b.amount - a.amount).forEach(e => {
     const pct = maxExp > 0 ? (e.amount / maxExp * 100) : 0;
-    const share = total > 0 ? (e.amount / total * 100) : 0;
+    const share = filteredTotal > 0 ? (e.amount / filteredTotal * 100) : 0;
     html += `<div class="bar-row"><div class="bar-label"><span>${escapeHtml(e.desc)}</span><span>${fmt(e.amount)} (${share.toFixed(0)}%)</span></div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;"></div></div></div>`;
   });
 
-  html += `<h2>Gastos registrados</h2><table><tr><th>Descrição</th><th>Valor</th><th>Pago por</th><th>Dividido entre</th></tr>`;
-  state.expenses.forEach(e => {
+  html += `<h2>Gastos registrados</h2>`;
+  if(filterActive){
+    html += `<div class="filter-note">Filtro aplicado: mostrando só gastos pagos por ${escapeHtml(expenseFilterPayer)}</div>`;
+  }
+  html += `<table><tr><th>Descrição</th><th>Valor</th><th>Pago por</th><th>Dividido entre</th></tr>`;
+  filteredExpenses.forEach(e => {
     html += `<tr><td>${escapeHtml(e.desc)}</td><td>${fmt(e.amount)}</td><td>${escapeHtml(e.payer)}</td><td>${e.participants.map(escapeHtml).join(', ')}</td></tr>`;
   });
   html += `</table>`;
+
+  if(filterActive){
+    html += `<p class="muted" style="margin-top:6px;">As seções abaixo (consumo, saldos e transferências) sempre refletem a viagem inteira, não o filtro aplicado.</p>`;
+  }
 
   html += `<h2>Quanto cada um gastou</h2><table><tr><th>Pessoa</th><th>Consumo total</th></tr>`;
   [...state.people].sort((a,b) => (consumption[b]||0) - (consumption[a]||0)).forEach(name => {
@@ -1174,16 +1195,78 @@ function renderParticipants(){
   });
 }
 
+let expenseFilterPayer = 'all';
+
+function getFilteredExpenses(){
+  if(expenseFilterPayer === 'all') return state.expenses;
+  return state.expenses.filter(e => e.payer === expenseFilterPayer);
+}
+
+function renderExpenseFilterOptions(){
+  const sel = document.getElementById('expenseFilterSelect');
+  if(!sel) return;
+  const prev = sel.value || expenseFilterPayer;
+  sel.innerHTML = '';
+  const allOpt = document.createElement('option');
+  allOpt.value = 'all';
+  allOpt.textContent = 'Todos';
+  sel.appendChild(allOpt);
+  state.people.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  });
+  if(prev === 'all' || state.people.includes(prev)){
+    sel.value = prev;
+    expenseFilterPayer = prev;
+  } else {
+    sel.value = 'all';
+    expenseFilterPayer = 'all';
+  }
+  updateClearFilterBtn();
+}
+
+function setExpenseFilter(value){
+  expenseFilterPayer = value;
+  renderExpenses();
+  renderCostChart();
+  updateClearFilterBtn();
+}
+
+function clearExpenseFilter(){
+  expenseFilterPayer = 'all';
+  const sel = document.getElementById('expenseFilterSelect');
+  if(sel) sel.value = 'all';
+  renderExpenses();
+  renderCostChart();
+  updateClearFilterBtn();
+}
+
+function updateClearFilterBtn(){
+  const btn = document.getElementById('clearFilterBtn');
+  if(!btn) return;
+  btn.style.display = expenseFilterPayer === 'all' ? 'none' : 'inline-block';
+}
+
 function renderExpenses(){
   const list = document.getElementById('expensesList');
   const emptyMsg = document.getElementById('expensesEmpty');
   list.innerHTML = '';
+  const filtered = getFilteredExpenses();
+
   if(state.expenses.length === 0){
+    emptyMsg.textContent = 'Nenhum gasto ainda.';
+    emptyMsg.style.display = 'block';
+    return;
+  }
+  if(filtered.length === 0){
+    emptyMsg.textContent = `Nenhum gasto pago por ${expenseFilterPayer}.`;
     emptyMsg.style.display = 'block';
     return;
   }
   emptyMsg.style.display = 'none';
-  [...state.expenses].reverse().forEach(e => {
+  [...filtered].reverse().forEach(e => {
     const row = document.createElement('div');
     row.className = 'ticket';
     row.innerHTML = `
@@ -1209,21 +1292,36 @@ function renderExpenses(){
 
 function renderCostChart(){
   const box = document.getElementById('costChart');
+  const note = document.getElementById('costChartFilterNote');
   box.innerHTML = '';
-  if(state.expenses.length === 0){
-    box.innerHTML = '<p class="empty-hint">Registre gastos para ver o gráfico.</p>';
+
+  const filtered = getFilteredExpenses();
+
+  if(note){
+    if(expenseFilterPayer === 'all'){
+      note.style.display = 'none';
+    } else {
+      note.style.display = 'block';
+      note.textContent = `Mostrando apenas gastos pagos por ${expenseFilterPayer}.`;
+    }
+  }
+
+  if(filtered.length === 0){
+    box.innerHTML = state.expenses.length === 0
+      ? '<p class="empty-hint">Registre gastos para ver o gráfico.</p>'
+      : `<p class="empty-hint">Nenhum gasto pago por ${expenseFilterPayer}.</p>`;
     return;
   }
 
-  const total = state.expenses.reduce((s,e) => s + e.amount, 0);
-  const max = Math.max(...state.expenses.map(e => e.amount));
+  const total = filtered.reduce((s,e) => s + e.amount, 0);
+  const max = Math.max(...filtered.map(e => e.amount));
 
   const totalEl = document.createElement('div');
   totalEl.className = 'cost-total';
-  totalEl.innerHTML = `Total da viagem<br><span>${fmt(total)}</span>`;
+  totalEl.innerHTML = `${expenseFilterPayer === 'all' ? 'Total da viagem' : `Total pago por ${escapeHtml(expenseFilterPayer)}`}<br><span>${fmt(total)}</span>`;
   box.appendChild(totalEl);
 
-  const sorted = [...state.expenses].sort((a,b) => b.amount - a.amount);
+  const sorted = [...filtered].sort((a,b) => b.amount - a.amount);
   sorted.forEach(e => {
     const pct = max > 0 ? (e.amount / max * 100) : 0;
     const sharePct = total > 0 ? (e.amount / total * 100) : 0;
@@ -1625,6 +1723,7 @@ function renderAll(){
   renderPeople();
   renderPayerSelect();
   renderParticipants();
+  renderExpenseFilterOptions();
   renderExpenses();
   renderCostChart();
   renderBalances();
