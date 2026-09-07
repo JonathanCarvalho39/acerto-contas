@@ -1057,14 +1057,12 @@ function renderPayerSelect(){
 }
 
 function ensurePayerIncluded(){
-  const payer = document.getElementById('payerSelect').value;
-  if(payer && !state.activeParticipants.includes(payer)){
-    state.activeParticipants.push(payer);
-  }
+  // O pagador NÃO entra automaticamente no rateio.
+  // Ele só participa se for selecionado manualmente.
   renderParticipants();
   updateSubmitButtonState();
 }
-
+  
 function renderParticipants(){
   const box = document.getElementById('participantsBox');
   box.innerHTML = '';
