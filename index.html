@@ -490,28 +490,20 @@
     border-bottom:1px solid rgba(27,53,71,0.08);
   }
   .individual-metric:last-child{ border-bottom:none; }
-  .individual-metric .label{ color:var(--ink-soft); margin:0; font-size:13px; }
+  .individual-metric .label{
+    color:var(--ink-soft);
+    margin:0;
+    font-size:13px;
+  }
   .individual-metric .value{
     font-family:'IBM Plex Mono',monospace;
     font-weight:600;
     white-space:nowrap;
   }
+  .individual-metric.general .value{ color:var(--gold); }
   .individual-metric.receive .value{ color:var(--green); }
   .individual-metric.own .value{ color:var(--rust); }
-  .individual-total{
-    display:flex;
-    justify-content:space-between;
-    gap:12px;
-    margin-top:8px;
-    padding-top:9px;
-    border-top:2px solid rgba(27,53,71,0.12);
-    font-size:13.5px;
-    font-weight:700;
-  }
-  .individual-total .value{
-    font-family:'IBM Plex Mono',monospace;
-    font-weight:800;
-  }
+
 </style>
 </head>
 <body>
@@ -598,7 +590,7 @@
   <section>
     <h2>Resumo individual dos gastos</h2>
     <p style="font-size:13px; color:rgba(246,241,227,0.6); margin:-4px 0 14px; line-height:1.5;">
-      Mostra quanto cada pessoa consumiu da parte geral, quanto tem a receber no acerto e quanto gastou somente para si.
+      Separa o que cada pessoa adiantou para gastos em conjunto, o que tem a receber no acerto e o quanto ela efetivamente consumiu — independente de quem pagou.
     </p>
     <div class="individual-summary" id="individualSummaryCard"></div>
   </section>
@@ -1509,33 +1501,26 @@ function escapeHtml(str){
 
 
 function computeIndividualSummary(){
-  const general = {};
-  const own = {};
-  state.people.forEach(name => {
-    general[name] = 0;
-    own[name] = 0;
-  });
+  const generalPaid = {};
+  const consumption = computeConsumption();
+  state.people.forEach(name => generalPaid[name] = 0);
 
+  // "Parte geral" representa o que a pessoa ADIANTOU em despesas
+  // compartilhadas. Quem pagou não é necessariamente quem consumiu.
   state.expenses.forEach(e => {
     const participants = Array.isArray(e.participants) ? e.participants : [];
-    if(participants.length === 0) return;
+    if(participants.length < 2) return;
 
-    // Gasto com apenas uma pessoa = gasto próprio.
-    if(participants.length === 1){
-      const person = participants[0];
-      if(own[person] !== undefined) own[person] += e.amount;
-      return;
+    if(generalPaid[e.payer] !== undefined){
+      generalPaid[e.payer] += e.amount;
     }
-
-    // Gasto compartilhado = somente a fatia consumida por cada participante.
-    const share = e.amount / participants.length;
-    participants.forEach(person => {
-      if(general[person] !== undefined) general[person] += share;
-    });
   });
 
-  const balances = computeRemainingBalances();
-  return { general, own, balances };
+  return {
+    generalPaid,
+    consumption,
+    balances: computeRemainingBalances()
+  };
 }
 
 function renderIndividualSummary(){
@@ -1547,36 +1532,49 @@ function renderIndividualSummary(){
     return;
   }
 
-  const { general, own, balances } = computeIndividualSummary();
+  const { generalPaid, consumption, balances } = computeIndividualSummary();
 
   state.people.forEach(name => {
-    const generalValue = general[name] || 0;
-    const ownValue = own[name] || 0;
+    const generalValue = generalPaid[name] || 0;
+    const consumedValue = consumption[name] || 0;
     const balance = balances[name] || 0;
-    const receiveValue = balance > 0.005 ? balance : 0;
-    const totalConsumed = generalValue + ownValue;
 
     const personCard = document.createElement('div');
     personCard.className = 'individual-card';
+
+    let settlementLabel;
+    let settlementValue;
+
+    if(balance > 0.005){
+      settlementLabel = 'Deve receber';
+      settlementValue = balance;
+    } else if(balance < -0.005){
+      settlementLabel = 'Deve pagar';
+      settlementValue = Math.abs(balance);
+    } else {
+      settlementLabel = 'Acerto';
+      settlementValue = 0;
+    }
+
     personCard.innerHTML = `
       <div class="person-name">${escapeHtml(name)}</div>
-      <div class="individual-metric">
-        <span class="label">Parte geral consumida</span>
+
+      <div class="individual-metric general">
+        <span class="label">Adiantou para a parte geral</span>
         <span class="value">${fmt(generalValue)}</span>
       </div>
+
       <div class="individual-metric receive">
-        <span class="label">${balance < -0.005 ? 'Deve pagar' : 'Deve receber'}</span>
-        <span class="value">${fmt(Math.abs(balance))}</span>
+        <span class="label">${settlementLabel}</span>
+        <span class="value">${fmt(settlementValue)}</span>
       </div>
+
       <div class="individual-metric own">
-        <span class="label">Gasto próprio</span>
-        <span class="value">${fmt(ownValue)}</span>
-      </div>
-      <div class="individual-total">
-        <span>Total consumido</span>
-        <span class="value">${fmt(totalConsumed)}</span>
+        <span class="label">Parte dele no consumo</span>
+        <span class="value">${fmt(consumedValue)}</span>
       </div>
     `;
+
     card.appendChild(personCard);
   });
 }
