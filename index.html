@@ -464,6 +464,54 @@
     text-align:center;
     margin-top: 10px;
   }
+
+  /* resumo individual dos gastos */
+  .individual-summary{
+    display:grid;
+    gap:10px;
+  }
+  .individual-card{
+    background:var(--paper);
+    color:var(--ink);
+    border-radius:var(--radius);
+    padding:14px 15px;
+  }
+  .individual-card .person-name{
+    font-weight:700;
+    font-size:15px;
+    margin-bottom:11px;
+  }
+  .individual-metric{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    padding:6px 0;
+    font-size:13px;
+    border-bottom:1px solid rgba(27,53,71,0.08);
+  }
+  .individual-metric:last-child{ border-bottom:none; }
+  .individual-metric .label{ color:var(--ink-soft); margin:0; font-size:13px; }
+  .individual-metric .value{
+    font-family:'IBM Plex Mono',monospace;
+    font-weight:600;
+    white-space:nowrap;
+  }
+  .individual-metric.receive .value{ color:var(--green); }
+  .individual-metric.own .value{ color:var(--rust); }
+  .individual-total{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    margin-top:8px;
+    padding-top:9px;
+    border-top:2px solid rgba(27,53,71,0.12);
+    font-size:13.5px;
+    font-weight:700;
+  }
+  .individual-total .value{
+    font-family:'IBM Plex Mono',monospace;
+    font-weight:800;
+  }
 </style>
 </head>
 <body>
@@ -544,6 +592,15 @@
       O total que cada pessoa efetivamente consumiu na viagem, somando a fatia dela em cada despesa — independente de quem adiantou o pagamento.
     </p>
     <div class="card" id="consumptionCard"></div>
+  </section>
+
+
+  <section>
+    <h2>Resumo individual dos gastos</h2>
+    <p style="font-size:13px; color:rgba(246,241,227,0.6); margin:-4px 0 14px; line-height:1.5;">
+      Mostra quanto cada pessoa consumiu da parte geral, quanto tem a receber no acerto e quanto gastou somente para si.
+    </p>
+    <div class="individual-summary" id="individualSummaryCard"></div>
   </section>
 
   <div class="footer-actions">
@@ -1450,6 +1507,80 @@ function escapeHtml(str){
   return d.innerHTML;
 }
 
+
+function computeIndividualSummary(){
+  const general = {};
+  const own = {};
+  state.people.forEach(name => {
+    general[name] = 0;
+    own[name] = 0;
+  });
+
+  state.expenses.forEach(e => {
+    const participants = Array.isArray(e.participants) ? e.participants : [];
+    if(participants.length === 0) return;
+
+    // Gasto com apenas uma pessoa = gasto próprio.
+    if(participants.length === 1){
+      const person = participants[0];
+      if(own[person] !== undefined) own[person] += e.amount;
+      return;
+    }
+
+    // Gasto compartilhado = somente a fatia consumida por cada participante.
+    const share = e.amount / participants.length;
+    participants.forEach(person => {
+      if(general[person] !== undefined) general[person] += share;
+    });
+  });
+
+  const balances = computeRemainingBalances();
+  return { general, own, balances };
+}
+
+function renderIndividualSummary(){
+  const card = document.getElementById('individualSummaryCard');
+  card.innerHTML = '';
+
+  if(state.people.length === 0 || state.expenses.length === 0){
+    card.innerHTML = '<p class="empty-hint">Registre gastos para ver o resumo individual.</p>';
+    return;
+  }
+
+  const { general, own, balances } = computeIndividualSummary();
+
+  state.people.forEach(name => {
+    const generalValue = general[name] || 0;
+    const ownValue = own[name] || 0;
+    const balance = balances[name] || 0;
+    const receiveValue = balance > 0.005 ? balance : 0;
+    const totalConsumed = generalValue + ownValue;
+
+    const personCard = document.createElement('div');
+    personCard.className = 'individual-card';
+    personCard.innerHTML = `
+      <div class="person-name">${escapeHtml(name)}</div>
+      <div class="individual-metric">
+        <span class="label">Parte geral consumida</span>
+        <span class="value">${fmt(generalValue)}</span>
+      </div>
+      <div class="individual-metric receive">
+        <span class="label">${balance < -0.005 ? 'Deve pagar' : 'Deve receber'}</span>
+        <span class="value">${fmt(Math.abs(balance))}</span>
+      </div>
+      <div class="individual-metric own">
+        <span class="label">Gasto próprio</span>
+        <span class="value">${fmt(ownValue)}</span>
+      </div>
+      <div class="individual-total">
+        <span>Total consumido</span>
+        <span class="value">${fmt(totalConsumed)}</span>
+      </div>
+    `;
+    card.appendChild(personCard);
+  });
+}
+
 function renderAll(){
   renderPeople();
   renderPayerSelect();
@@ -1460,6 +1591,7 @@ function renderAll(){
   renderSettlements();
   renderMoneyFlow();
   renderConsumption();
+  renderIndividualSummary();
 }
 
 document.getElementById('personInput').addEventListener('keydown', (e) => {
